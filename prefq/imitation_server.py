@@ -1,6 +1,7 @@
 """A webserver that asks the user preference queries."""
 
 import os
+import queue
 from urllib.parse import unquote
 
 import flask
@@ -16,12 +17,11 @@ app.config["VIDEO_FOLDER"] = "videos"
 # (all uppercase). Therefore we need to ignore invalid-name here
 # pylint: disable=invalid-name
 n_pending_queries = 0
-videos_rendered = 0
 feedback_data = {}
 filenames_array = []
+video_rendering_queue = queue.Queue()
 
 
-@app.before_first_request
 def before_first_request():
     """Define starting routine"""
 
@@ -43,25 +43,18 @@ def index():
 def load_web_interface():
     """Send HTML interface to Feedback Client"""
 
-    # should be replaced by flask session object
-    # pylint: disable=global-statement
-    global videos_rendered
-
-    available_videos = len(filenames_array) - videos_rendered
-    is_video_available = available_videos > 0 and len(filenames_array) != 0
+    available_videos = video_rendering_queue.qsize()
+    is_video_available = available_videos > 0
 
     print("\n\nServer: Starting load_web_interface() [...] ")
-    print("Server: Evaluated Videos: " + str(videos_rendered))
     print("Server: Available Videos: " + str(available_videos))
 
     if is_video_available:
-        videos_rendered += 2
-
         print("Server: [...] Terminating load_web_interface()")
         return flask.render_template(
-            "web_interface.html",
-            video_filename_left=filenames_array[videos_rendered - 2],
-            video_filename_right=filenames_array[videos_rendered - 1],
+            "imitation_web_interface.html",
+            video_filename_left=video_rendering_queue.get(),
+            video_filename_right=video_rendering_queue.get(),
         )
 
     print("Server: [...] No data available")
@@ -74,8 +67,10 @@ def receive_videos():
 
     print("\n\nServer: Starting receive_videos() [...]")
 
+    # should be replaced by flask session object
+    # pylint: disable=global-statement
     global n_pending_queries
-    
+
     if n_pending_queries == 0:
         data = flask.request.json
         n_pending_queries = data["n_pending_queries"]
@@ -95,15 +90,12 @@ def receive_videos():
 
     left_video.save(os.path.join(app.config["VIDEO_FOLDER"], left_filename))
     right_video.save(os.path.join(app.config["VIDEO_FOLDER"], right_filename))
-    filenames_array.append(left_filename)
-    filenames_array.append(right_filename)
-    # Add empty feedback value for newly received, unevaluated data
-
+    video_rendering_queue.put(left_filename)
+    video_rendering_queue.put(right_filename)
     print("Server: ...Videos stored locally")
 
     print("Server: [...] Terminating receive_videos()")
     return "Server: [...] Terminating receive_videos()"
-
 
 
 @app.route("/videos/<path:filename>", methods=["GET"])
@@ -122,7 +114,6 @@ def receive_feedback():
 
     # should be replaced by flask session object
     # pylint: disable=global-statement
-    global feedback_data
     global n_pending_queries
 
     data = flask.request.json  # Represents incoming client http request in json format
@@ -131,12 +122,16 @@ def receive_feedback():
     # Extract received JSON data
     is_left_preferred = data["is_left_preferred"]
     left_filename = data["video_filename_left"]
-
     query_id = left_filename[: -len("-left.webm")]
 
-    # Check for defective msg transfer
+    # Check if feedback was given - if not, refill queue
     if is_left_preferred is None:
-        return jsonify({"success": False})
+        print("Server: No feedback received")
+        right_filename = query_id + "-right.webm"
+        video_rendering_queue.put(left_filename)
+        video_rendering_queue.put(right_filename)
+        print("Server: [...] Terminating receive_feedback()")
+        return jsonify({"success": True})
 
     # Save feedback
     new_data = {query_id: is_left_preferred}
@@ -161,8 +156,6 @@ def receive_feedback():
 def send_feedback():
     """Sends feedback to Query Client"""
 
-    global n_pending_queries
-
     print("\n\nServer: Starting send_feedback() [...]")
 
     if n_pending_queries == 0:
@@ -171,13 +164,14 @@ def send_feedback():
         feedback_data.clear()
         print("Server: [...] Terminating send_feedback()")
         return jsonify(feedback_data_copy)
-    else:
-        print("Feedback not fully evaluated")
-        print("Remaining Queries: " + str(n_pending_queries))
-        print("Server: [...] Terminating send_feedback()")
-        empty_dict = {}
-        return jsonify(empty_dict)
-                
+
+    print("Feedback not fully evaluated")
+    print("Remaining Queries: " + str(n_pending_queries))
+    print("Server: [...] Terminating send_feedback()")
+    empty_dict = {}
+    return jsonify(empty_dict)
+
 
 if __name__ == "__main__":
+    before_first_request()
     app.run(host="127.0.0.1", port=5000, debug=True)
