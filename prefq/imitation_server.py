@@ -170,8 +170,10 @@ def send_feedback():
 
     if n_pending_queries == 0:
         print("Feddback fully evaluated")
+        feedback_data_copy = feedback_data.copy()
+        feedback_data.clear()
         print("Server: [...] Terminating send_feedback()")
-        return jsonify(feedback_data)
+        return jsonify(feedback_data_copy)
     else:
         print("Feedback not fully evaluated")
         print("Remaining Queries: " + str(n_pending_queries))
