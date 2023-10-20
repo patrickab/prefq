@@ -17,7 +17,6 @@ app.config["VIDEO_FOLDER"] = "videos"
 # pylint: disable=invalid-name
 n_pending_queries = 0
 videos_rendered = 0
-videos_evaluated = 0
 feedback_data = {}
 filenames_array = []
 
@@ -124,11 +123,9 @@ def receive_feedback():
     # should be replaced by flask session object
     # pylint: disable=global-statement
     global feedback_data
-    global videos_evaluated
     global n_pending_queries
 
     data = flask.request.json  # Represents incoming client http request in json format
-    videos_evaluated += 2  # Incoming request indicates new batch evaluation
     print(data)
 
     # Extract received JSON data
